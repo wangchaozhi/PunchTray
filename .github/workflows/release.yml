@@ -1,0 +1,296 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.0.0. Leave empty to bump the latest tag's patch (v1.0.1 -> v1.0.2)."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark this GitHub release as a prerelease"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: PunchTray
+  QT_VERSION: 6.10.0
+  BUILD_TYPE: Release
+
+jobs:
+  prepare:
+    name: Resolve release tag
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          elif [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+          else
+            git fetch --tags --force
+            latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+            if [ -z "${latest}" ]; then
+              tag="v1.0.0"
+            else
+              IFS='.' read -r major minor patch <<<"${latest#v}"
+              tag="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          echo "Release tag: ${tag}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.asset_name }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            aqt_host: windows
+            qt_arch: win64_msvc2022_64
+            qt_dir: msvc2022_64
+            asset_name: PunchTray-windows-x64
+          - os: macos-15
+            aqt_host: mac
+            qt_arch: clang_64
+            qt_dir: macos
+            cmake_extra_args: -DCMAKE_OSX_ARCHITECTURES=arm64
+            asset_name: PunchTray-macos-arm64
+          - os: ubuntu-22.04
+            aqt_host: linux
+            qt_arch: linux_gcc_64
+            qt_dir: gcc_64
+            asset_name: PunchTray-linux-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libgl1-mesa-dev libegl1-mesa-dev patchelf wget \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xinput0 libxcb-xkb1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-v1-punchtray-${{ runner.os }}-${{ env.QT_VERSION }}-${{ matrix.qt_arch }}
+
+      - name: Install Qt
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip aqtinstall
+          python -m aqt install-qt "${{ matrix.aqt_host }}" desktop "${QT_VERSION}" "${{ matrix.qt_arch }}" -O "${RUNNER_TEMP}/Qt"
+
+      - name: Configure Qt environment
+        shell: bash
+        run: |
+          qt_root="${RUNNER_TEMP}/Qt/${QT_VERSION}/${{ matrix.qt_dir }}"
+          if [ ! -d "${qt_root}" ]; then
+            echo "Qt root was not found: ${qt_root}" >&2
+            exit 1
+          fi
+          echo "QT_ROOT=${qt_root}" >> "${GITHUB_ENV}"
+          echo "${qt_root}/bin" >> "${GITHUB_PATH}"
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT"
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${QT_ROOT}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" ${{ matrix.cmake_extra_args || '' }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $deployDir = Join-Path $PWD "package\${{ matrix.asset_name }}"
+          New-Item -ItemType Directory -Force -Path $deployDir | Out-Null
+          $exe = Get-ChildItem -Path build -Recurse -Filter "${env:APP_NAME}.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Executable was not found." }
+          Copy-Item $exe.FullName $deployDir
+          Copy-Item README.md $deployDir
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-ffmpeg `
+            "$deployDir\${env:APP_NAME}.exe"
+          Compress-Archive -Path "$deployDir\*" -DestinationPath "package\${{ matrix.asset_name }}.zip" -Force
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find build -maxdepth 3 -name "${APP_NAME}.app" -print -quit)"
+          if [ -z "${app_path}" ]; then
+            echo "${APP_NAME}.app was not found." >&2
+            exit 1
+          fi
+          macdeployqt "${app_path}"
+          codesign --force --deep --sign - "${app_path}"
+
+          dmg_root="package/${{ matrix.asset_name }}"
+          mkdir -p "${dmg_root}"
+          cp -R "${app_path}" "${dmg_root}/"
+          cp README.md "${dmg_root}/"
+          ln -s /Applications "${dmg_root}/Applications"
+          hdiutil create -volname "${APP_NAME}" -srcfolder "${dmg_root}" -ov -format UDZO \
+            "package/${{ matrix.asset_name }}.dmg"
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package tools AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
+          cp "build/${APP_NAME}" "AppDir/usr/bin/${APP_NAME}"
+          cp assets/punchtray.svg "AppDir/usr/share/icons/hicolor/scalable/apps/${APP_NAME}.svg"
+          cat > "AppDir/usr/share/applications/${APP_NAME}.desktop" <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=PunchTray
+          Comment=Missed attendance punch reminder
+          Exec=PunchTray
+          Icon=PunchTray
+          Categories=Utility;
+          Terminal=false
+          EOF
+          sed -i 's/^[[:space:]]*//' "AppDir/usr/share/applications/${APP_NAME}.desktop"
+
+          wget -q -O tools/linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q -O tools/linuxdeploy-plugin-qt-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x tools/*.AppImage
+
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export QMAKE="${QT_ROOT}/bin/qmake"
+          export VERSION="${{ needs.prepare.outputs.tag }}"
+          export PATH="${PWD}/tools:${PATH}"
+          tools/linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable "AppDir/usr/bin/${APP_NAME}" \
+            --desktop-file "AppDir/usr/share/applications/${APP_NAME}.desktop" \
+            --icon-file "AppDir/usr/share/icons/hicolor/scalable/apps/${APP_NAME}.svg" \
+            --plugin qt \
+            --output appimage
+
+          generated="$(find . -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          if [ -z "${generated}" ]; then
+            echo "Generated AppImage was not found." >&2
+            exit 1
+          fi
+          mv "${generated}" "package/${{ matrix.asset_name }}.AppImage"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            package/*.zip
+            package/*.dmg
+            package/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    needs: [prepare, build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create tag
+        env:
+          TAG_NAME: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --tags
+          if ! git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
+            git push origin "${TAG_NAME}"
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          ls -la dist
+
+          notes="$(mktemp)"
+          previous="$(git tag --sort=-creatordate | grep -vx "${TAG_NAME}" | head -n 1 || true)"
+          range="${previous:+${previous}..}${TAG_NAME}"
+          {
+            echo "PunchTray ${TAG_NAME}"
+            echo
+            echo "Changes:"
+            git log --pretty='format:- %s (%h)' "${range}" || true
+            echo
+            if [ -n "${previous}" ]; then
+              echo
+              echo "Full changelog: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${previous}...${TAG_NAME}"
+            fi
+          } > "${notes}"
+
+          flags=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            flags=(--prerelease)
+          fi
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release edit "${TAG_NAME}" --notes-file "${notes}" "${flags[@]}"
+            gh release upload "${TAG_NAME}" dist/* --clobber
+          else
+            gh release create "${TAG_NAME}" dist/* --title "PunchTray ${TAG_NAME}" --notes-file "${notes}" "${flags[@]}"
+          fi

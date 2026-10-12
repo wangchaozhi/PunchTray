@@ -30,6 +30,15 @@ cmake --build build --config Release
 
 On Windows, run `windeployqt --release build\Release\PunchTray.exe` afterwards. On macOS, use `macdeployqt`.
 
+## Release
+
+`.github/workflows/release.yml` builds Windows x64 (zip), macOS arm64 (dmg) and Linux x64 (AppImage) packages and publishes them as a GitHub Release. It runs either way:
+
+- Push a tag: `git tag v1.0.1 && git push origin v1.0.1`.
+- Run "Build and Release" manually from the Actions tab. Leave the tag empty to bump the latest tag's patch version.
+
+The macOS build is only ad-hoc signed. On first launch, right-click the app and choose Open.
+
 ## Liquid glass
 
 The card captures the desktop behind it, then blurs it, boosts its saturation and magnifies it slightly to look like refraction. It adds a rim highlight, a specular sheen and a gradient bevel on top. Text switches between light and dark based on the brightness of the background.
