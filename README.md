@@ -4,6 +4,8 @@ A system-tray app for Beisen iTalent (北森 iTalent) attendance. It runs in the
 
 - Left-click the tray icon to show or hide the card. Right-click for: 立即刷新 (refresh now), 设置 (settings, e.g. updating the Cookie), 打开配置文件 (open the config file), 开机自启动 (launch at login; Windows uses the HKCU Run key, macOS a LaunchAgent, Linux `~/.config/autostart`) and 退出 (quit).
 - The tray icon shows a red badge with the number of missed punches, or an orange `!` when the query fails or the Cookie has expired.
+- Drag the card anywhere; the position is remembered. Double-click the card (or use 面板回到右上角 in the tray menu) to snap it back to the top-right corner.
+- Only one instance runs per user; launching it again just shows the existing card.
 - When a new missed punch appears, the card pops up automatically. For today's records it counts down to the punch time.
 
 ## Configuration

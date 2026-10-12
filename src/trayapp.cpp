@@ -78,6 +78,10 @@ TrayApp::TrayApp(QObject *parent)
     auto *menu = new QMenu;
     menu->addAction(QStringLiteral("显示 / 隐藏面板"), m_panel, &GlassPanel::toggle);
     menu->addAction(QStringLiteral("立即刷新"), this, &TrayApp::refresh);
+    menu->addAction(QStringLiteral("面板回到右上角"), m_panel, [this] {
+        m_panel->resetPosition();
+        m_panel->showAnimated();
+    });
     menu->addSeparator();
     menu->addAction(QStringLiteral("设置…"), this, &TrayApp::openSettings);
     menu->addAction(QStringLiteral("打开配置文件"), this, [] {
@@ -111,6 +115,11 @@ TrayApp::TrayApp(QObject *parent)
     connect(m_panel, &GlassPanel::refreshRequested, this, &TrayApp::refresh);
     connect(m_timer, &QTimer::timeout, this, &TrayApp::refresh);
 
+    connect(m_panel, &GlassPanel::positionChanged, this, [this](std::optional<QPoint> pos) {
+        m_config.panelPos = pos;
+        m_config.save();
+    });
+    m_panel->setCustomPosition(m_config.panelPos);
     m_panel->setIntervalMinutes(m_config.intervalMinutes);
     m_timer->start(m_config.intervalMinutes * 60 * 1000);
 
@@ -221,4 +230,9 @@ void TrayApp::openSettings()
     m_panel->setIntervalMinutes(m_config.intervalMinutes);
     m_timer->start(m_config.intervalMinutes * 60 * 1000);
     refresh();
+}
+
+void TrayApp::showPanel()
+{
+    m_panel->showAnimated();
 }

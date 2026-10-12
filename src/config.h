@@ -1,6 +1,9 @@
 #pragma once
 
+#include <QPoint>
 #include <QString>
+
+#include <optional>
 
 struct Config
 {
@@ -11,6 +14,7 @@ struct Config
     int intervalMinutes = 10;   // polling interval
     int daysBack = 0;           // 0 = today only
     bool autoPopup = true;      // pop the panel when new missed punches appear
+    std::optional<QPoint> panelPos; // dragged card position; unset = top-right corner
 
     static QString filePath();
     static Config load();       // creates a template file on first run

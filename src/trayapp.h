@@ -17,6 +17,8 @@ public:
     explicit TrayApp(QObject *parent = nullptr);
     ~TrayApp() override;
 
+    void showPanel();
+
 private:
     void refresh();
     void openSettings();

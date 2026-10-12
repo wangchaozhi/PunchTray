@@ -1,6 +1,6 @@
 #include "glasspanel.h"
 
-#include <QGuiApplication>
+#include <QApplication>
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
@@ -91,6 +91,19 @@ QString weekday(const QDate &d)
     return QStringLiteral("星期") + QString::fromUtf8(names[d.dayOfWeek() - 1]);
 }
 
+// Windows can hide the card from screen capture, so only there may the backdrop be
+// re-captured while the card is visible. PUNCHTRAY_CAPTURABLE=1 turns this off (for
+// screenshots) and freezes the backdrop.
+bool liveBackdrop()
+{
+#ifdef Q_OS_WIN
+    static const bool live = !qEnvironmentVariableIsSet("PUNCHTRAY_CAPTURABLE");
+    return live;
+#else
+    return false;
+#endif
+}
+
 QString shortTime(const QString &dateTime)
 {
     // "2026/10/12 09:58:00" -> "09:58"
@@ -118,8 +131,6 @@ GlassPanel::GlassPanel(QWidget *parent)
             hide();
     });
 
-    // Only Windows can exclude this window from screen capture, so only there can the
-    // backdrop be refreshed while the card is visible.
     m_backdropTimer->setInterval(700);
     connect(m_backdropTimer, &QTimer::timeout, this, [this] {
         captureBackdrop();
@@ -161,10 +172,24 @@ void GlassPanel::relayout()
     const int h = kHeader + rows * kRow + kFooter;
     const QSize size(kWidth + 2 * kShadow, h + 2 * kShadow);
 
-    QScreen *s = QGuiApplication::primaryScreen();
-    const QRect avail = s->availableGeometry();
-    const QPoint topLeft(avail.right() - size.width() + kShadow - kScreenGap,
+    QPoint topLeft;
+    if (m_customPos) {
+        // Keep the card where the user dropped it, but fully on its screen.
+        const QPoint card = *m_customPos;
+        QScreen *s = QGuiApplication::screenAt(card + QPoint(kWidth / 2, h / 2));
+        if (!s)
+            s = QGuiApplication::screenAt(card);
+        if (!s)
+            s = QGuiApplication::primaryScreen();
+        const QRect avail = s->availableGeometry();
+        const int x = qBound(avail.left(), card.x(), qMax(avail.left(), avail.right() + 1 - kWidth));
+        const int y = qBound(avail.top(), card.y(), qMax(avail.top(), avail.bottom() + 1 - h));
+        topLeft = QPoint(x - kShadow, y - kShadow);
+    } else {
+        const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
+        topLeft = QPoint(avail.right() - size.width() + kShadow - kScreenGap,
                          avail.top() - kShadow + kScreenGap);
+    }
 
     const bool changed = size != this->size() || pos() != topLeft;
     setFixedSize(size);
@@ -214,8 +239,7 @@ void GlassPanel::showEvent(QShowEvent *e)
     QWidget::showEvent(e);
 #ifdef Q_OS_WIN
     // Hidden from screen capture so the live backdrop never samples the card itself.
-    // PUNCHTRAY_CAPTURABLE=1 turns this off (for screenshots) and freezes the backdrop.
-    if (!qEnvironmentVariableIsSet("PUNCHTRAY_CAPTURABLE"))
+    if (liveBackdrop())
         SetWindowDisplayAffinity(reinterpret_cast<HWND>(winId()), WDA_EXCLUDEFROMCAPTURE);
 #endif
 }
@@ -229,10 +253,8 @@ void GlassPanel::showAnimated()
         show();
     }
     raise();
-#ifdef Q_OS_WIN
-    if (!qEnvironmentVariableIsSet("PUNCHTRAY_CAPTURABLE"))
+    if (liveBackdrop())
         m_backdropTimer->start();
-#endif
     m_tickTimer->start();
     m_fade->stop();
     m_fade->setStartValue(windowOpacity());
@@ -484,18 +506,98 @@ void GlassPanel::paintContent(QPainter &p)
     p.drawText(QRect(x, y, card.width() - 40, kFooter), Qt::AlignLeft | Qt::AlignVCenter, footer);
 }
 
+void GlassPanel::setCustomPosition(std::optional<QPoint> cardTopLeft)
+{
+    m_customPos = cardTopLeft;
+    relayout();
+}
+
+void GlassPanel::resetPosition()
+{
+    m_customPos.reset();
+    relayout();
+    if (isVisible() && !liveBackdrop())
+        captureBackdropBehind();
+    emit positionChanged(std::nullopt);
+}
+
+// Off Windows the card cannot be excluded from capture, so make it invisible for the
+// instant of the grab.
+void GlassPanel::captureBackdropBehind()
+{
+    const qreal opacity = windowOpacity();
+    setWindowOpacity(0.0);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    captureBackdrop();
+    setWindowOpacity(opacity);
+    update();
+}
+
 void GlassPanel::mousePressEvent(QMouseEvent *e)
 {
     if (e->button() != Qt::LeftButton)
         return;
-    if (closeButtonRect().contains(e->position().toPoint()))
+    const QPoint pt = e->position().toPoint();
+    if (closeButtonRect().contains(pt) || refreshButtonRect().contains(pt))
+        return; // buttons act on release
+    if (cardRect().contains(pt)) {
+        m_pressGlobal = e->globalPosition().toPoint();
+        m_dragOffset = m_pressGlobal - pos();
+        m_pressed = true;
+        m_dragging = false;
+    }
+}
+
+void GlassPanel::mouseReleaseEvent(QMouseEvent *e)
+{
+    if (e->button() != Qt::LeftButton)
+        return;
+    m_pressed = false;
+    if (m_dragging) {
+        m_dragging = false;
+        setCursor(Qt::ArrowCursor);
+        m_customPos = pos() + QPoint(kShadow, kShadow);
+        relayout(); // clamps to the screen
+        m_customPos = pos() + QPoint(kShadow, kShadow);
+        if (!liveBackdrop())
+            captureBackdropBehind();
+        emit positionChanged(m_customPos);
+        return;
+    }
+    const QPoint pt = e->position().toPoint();
+    if (closeButtonRect().contains(pt))
         hideAnimated();
-    else if (refreshButtonRect().contains(e->position().toPoint()))
+    else if (refreshButtonRect().contains(pt))
         emit refreshRequested();
+}
+
+void GlassPanel::mouseDoubleClickEvent(QMouseEvent *e)
+{
+    const QPoint pt = e->position().toPoint();
+    if (e->button() == Qt::LeftButton && cardRect().contains(pt) && !closeButtonRect().contains(pt)
+        && !refreshButtonRect().contains(pt)) {
+        resetPosition();
+    }
 }
 
 void GlassPanel::mouseMoveEvent(QMouseEvent *e)
 {
+    if (m_pressed && (e->buttons() & Qt::LeftButton)) {
+        const QPoint global = e->globalPosition().toPoint();
+        if (!m_dragging
+            && (global - m_pressGlobal).manhattanLength() >= QApplication::startDragDistance()) {
+            m_dragging = true;
+            setCursor(Qt::ClosedHandCursor);
+        }
+        if (m_dragging) {
+            move(global - m_dragOffset);
+            if (liveBackdrop())
+                captureBackdrop();
+            update();
+        }
+        return;
+    }
+
     const QPoint pt = e->position().toPoint();
     const int hover = closeButtonRect().contains(pt) ? 1 : refreshButtonRect().contains(pt) ? 2 : 0;
     if (hover != m_hover) {

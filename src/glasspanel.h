@@ -6,12 +6,14 @@
 #include <QImage>
 #include <QWidget>
 
+#include <optional>
+
 class QPropertyAnimation;
 class QTimer;
 
-// Frameless always-on-top "liquid glass" card pinned to the top-right corner of the
+// Frameless always-on-top "liquid glass" card, by default in the top-right corner of the
 // primary screen. Everything is custom painted; the frosted backdrop is a blurred
-// capture of the desktop behind the card.
+// capture of the desktop behind the card. It can be dragged anywhere.
 class GlassPanel : public QWidget
 {
     Q_OBJECT
@@ -27,13 +29,20 @@ public:
     void hideAnimated();
     void toggle();
 
+    // Card top-left in global coordinates; nullopt pins it to the top-right corner.
+    void setCustomPosition(std::optional<QPoint> cardTopLeft);
+    void resetPosition();
+
 signals:
     void refreshRequested();
+    void positionChanged(std::optional<QPoint> cardTopLeft);
 
 protected:
     void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *e) override;
     void mouseMoveEvent(QMouseEvent *e) override;
+    void mouseReleaseEvent(QMouseEvent *e) override;
+    void mouseDoubleClickEvent(QMouseEvent *e) override;
     void leaveEvent(QEvent *) override;
     void showEvent(QShowEvent *e) override;
 
@@ -43,6 +52,7 @@ private:
     QRect closeButtonRect() const;
     QRect refreshButtonRect() const;
     void captureBackdrop();
+    void captureBackdropBehind();
     void paintBackdrop(QPainter &p, const QPainterPath &shape);
     void paintContent(QPainter &p);
 
@@ -59,4 +69,10 @@ private:
     QTimer *m_tickTimer;        // keeps countdowns fresh
     QPropertyAnimation *m_fade;
     int m_hover = 0;            // 0 none, 1 close, 2 refresh
+
+    std::optional<QPoint> m_customPos; // dragged card position (global, card top-left)
+    bool m_pressed = false;
+    bool m_dragging = false;
+    QPoint m_pressGlobal;
+    QPoint m_dragOffset;
 };

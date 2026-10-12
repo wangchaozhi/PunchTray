@@ -41,6 +41,9 @@ Config Config::load()
     c.intervalMinutes = qMax(1, o.value("intervalMinutes").toInt(c.intervalMinutes));
     c.daysBack = qBound(0, o.value("daysBack").toInt(c.daysBack), 31);
     c.autoPopup = o.value("autoPopup").toBool(c.autoPopup);
+    const QJsonObject pos = o.value("panelPos").toObject();
+    if (pos.contains("x") && pos.contains("y"))
+        c.panelPos = QPoint(pos.value("x").toInt(), pos.value("y").toInt());
     return c;
 }
 
@@ -56,6 +59,8 @@ bool Config::save() const
         {"daysBack", daysBack},
         {"autoPopup", autoPopup},
     };
+    if (panelPos)
+        o.insert("panelPos", QJsonObject{{"x", panelPos->x()}, {"y", panelPos->y()}});
     QSaveFile f(filePath());
     if (!f.open(QIODevice::WriteOnly))
         return false;
