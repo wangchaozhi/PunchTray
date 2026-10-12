@@ -131,12 +131,12 @@ jobs:
       - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT"
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT" -DPUNCHTRAY_VERSION="${{ needs.prepare.outputs.tag }}"
 
       - name: Configure Unix
         if: runner.os != 'Windows'
         shell: bash
-        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${QT_ROOT}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" ${{ matrix.cmake_extra_args || '' }}
+        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${QT_ROOT}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DPUNCHTRAY_VERSION="${{ needs.prepare.outputs.tag }}" ${{ matrix.cmake_extra_args || '' }}
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4

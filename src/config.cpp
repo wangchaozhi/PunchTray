@@ -41,6 +41,8 @@ Config Config::load()
     c.intervalMinutes = qMax(1, o.value("intervalMinutes").toInt(c.intervalMinutes));
     c.daysBack = qBound(0, o.value("daysBack").toInt(c.daysBack), 31);
     c.autoPopup = o.value("autoPopup").toBool(c.autoPopup);
+    c.autoUpdate = o.value("autoUpdate").toBool(c.autoUpdate);
+    c.githubToken = o.value("githubToken").toString();
     const QJsonObject pos = o.value("panelPos").toObject();
     if (pos.contains("x") && pos.contains("y"))
         c.panelPos = QPoint(pos.value("x").toInt(), pos.value("y").toInt());
@@ -58,6 +60,8 @@ bool Config::save() const
         {"intervalMinutes", intervalMinutes},
         {"daysBack", daysBack},
         {"autoPopup", autoPopup},
+        {"autoUpdate", autoUpdate},
+        {"githubToken", githubToken},
     };
     if (panelPos)
         o.insert("panelPos", QJsonObject{{"x", panelPos->x()}, {"y", panelPos->y()}});

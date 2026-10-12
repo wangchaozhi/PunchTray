@@ -2,6 +2,7 @@
 
 #include "autostart.h"
 #include "glasspanel.h"
+#include "updater.h"
 
 #include <QAction>
 #include <QApplication>
@@ -12,6 +13,7 @@
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
@@ -74,6 +76,8 @@ TrayApp::TrayApp(QObject *parent)
     , m_panel(new GlassPanel)
     , m_tray(new QSystemTrayIcon(this))
     , m_timer(new QTimer(this))
+    , m_updater(new Updater(this))
+    , m_updateTimer(new QTimer(this))
 {
     auto *menu = new QMenu;
     menu->addAction(QStringLiteral("显示 / 隐藏面板"), m_panel, &GlassPanel::toggle);
@@ -98,6 +102,7 @@ TrayApp::TrayApp(QObject *parent)
                                 QSystemTrayIcon::Warning);
         }
     });
+    setupUpdater(menu);
     menu->addSeparator();
     menu->addAction(QStringLiteral("退出"), qApp, &QApplication::quit);
 
@@ -133,6 +138,85 @@ TrayApp::~TrayApp()
 {
     delete m_tray->contextMenu();
     delete m_panel;
+}
+
+void TrayApp::setupUpdater(QMenu *menu)
+{
+    menu->addSeparator();
+    m_updateAction = menu->addAction(QStringLiteral("检查更新"));
+    QAction *version = menu->addAction(QStringLiteral("当前版本 v%1").arg(Updater::currentVersion()));
+    version->setEnabled(false);
+
+    m_updater->setToken(m_config.githubToken);
+    connect(m_updateAction, &QAction::triggered, this, [this] {
+        if (m_updater->hasUpdate())
+            m_updater->install();
+        else
+            m_updater->check(true);
+    });
+    connect(m_tray, &QSystemTrayIcon::messageClicked, this, [this] {
+        if (m_updater->hasUpdate())
+            m_updater->install();
+    });
+
+    connect(m_updater, &Updater::updateAvailable, this, [this](const ReleaseInfo &r, bool manual) {
+        m_updateAction->setText(QStringLiteral("更新到 %1").arg(r.tag));
+        if (m_installWhenFound) {
+            m_installWhenFound = false;
+            m_updater->install();
+            return;
+        }
+        if (!manual) {
+            m_tray->showMessage(QStringLiteral("PunchTray 有新版本 %1").arg(r.tag),
+                                QStringLiteral("点击这里，或在托盘菜单中选择“更新到 %1”").arg(r.tag));
+            return;
+        }
+        const auto answer = QMessageBox::question(
+            nullptr, QStringLiteral("PunchTray"),
+            QStringLiteral("发现新版本 %1（当前 v%2），现在更新并重启吗？").arg(r.tag, Updater::currentVersion()));
+        if (answer == QMessageBox::Yes)
+            m_updater->install();
+    });
+    connect(m_updater, &Updater::upToDate, this, [this](bool manual) {
+        m_installWhenFound = false;
+        if (manual)
+            m_tray->showMessage(QStringLiteral("PunchTray"),
+                                QStringLiteral("已是最新版本 v%1").arg(Updater::currentVersion()));
+    });
+    connect(m_updater, &Updater::checkFailed, this, [this](const QString &message, bool manual) {
+        m_installWhenFound = false;
+        if (manual)
+            m_tray->showMessage(QStringLiteral("PunchTray"), message, QSystemTrayIcon::Warning);
+    });
+    connect(m_updater, &Updater::downloadProgress, this, [this](int percent) {
+        m_updateAction->setText(QStringLiteral("正在下载更新 %1%").arg(percent));
+        m_tray->setToolTip(QStringLiteral("正在下载更新 %1%").arg(percent));
+    });
+    connect(m_updater, &Updater::installFailed, this, [this](const QString &message) {
+        m_updateAction->setText(QStringLiteral("更新到 %1").arg(m_updater->latest().tag));
+        m_tray->showMessage(QStringLiteral("PunchTray 更新失败"), message, QSystemTrayIcon::Warning);
+    });
+
+    // First check shortly after start-up, then every 6 hours.
+    connect(m_updateTimer, &QTimer::timeout, this, [this] {
+        if (m_config.autoUpdate && !m_updater->hasUpdate())
+            m_updater->check(false);
+    });
+    m_updateTimer->start(6 * 60 * 60 * 1000);
+    QTimer::singleShot(20 * 1000, this, [this] {
+        if (m_config.autoUpdate)
+            m_updater->check(false);
+    });
+}
+
+void TrayApp::updateNow()
+{
+    if (m_updater->hasUpdate()) {
+        m_updater->install();
+        return;
+    }
+    m_installWhenFound = true;
+    m_updater->check(true);
 }
 
 void TrayApp::refresh()
@@ -186,7 +270,7 @@ void TrayApp::openSettings()
     cookie->setPlaceholderText(QStringLiteral("Tita_PC=...; ssn_Tita_PC=...; ..."));
     cookie->setFixedHeight(90);
     auto *staffId = new QLineEdit(m_config.staffId);
-    staffId->setPlaceholderText(QStringLiteral("例如 641007593"));
+    staffId->setPlaceholderText(QStringLiteral("例如 123456789"));
     auto *staffText = new QLineEdit(m_config.staffText);
     staffText->setPlaceholderText(QStringLiteral("姓名(邮箱)"));
     auto *url = new QLineEdit(m_config.url);
@@ -201,6 +285,11 @@ void TrayApp::openSettings()
     days->setValue(m_config.daysBack);
     auto *popup = new QCheckBox(QStringLiteral("发现新的未打卡记录时自动弹出面板"));
     popup->setChecked(m_config.autoPopup);
+    auto *autoUpdate = new QCheckBox(QStringLiteral("自动检查更新"));
+    autoUpdate->setChecked(m_config.autoUpdate);
+    auto *token = new QLineEdit(m_config.githubToken);
+    token->setEchoMode(QLineEdit::Password);
+    token->setPlaceholderText(QStringLiteral("仅当 GitHub 仓库为私有时需要（只读 Contents 权限即可）"));
 
     auto *form = new QFormLayout(&dlg);
     form->addRow(QStringLiteral("Cookie"), cookie);
@@ -210,6 +299,8 @@ void TrayApp::openSettings()
     form->addRow(QStringLiteral("刷新间隔"), interval);
     form->addRow(QStringLiteral("向前查询"), days);
     form->addRow(QString(), popup);
+    form->addRow(QString(), autoUpdate);
+    form->addRow(QStringLiteral("GitHub Token"), token);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
     form->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -225,6 +316,9 @@ void TrayApp::openSettings()
     m_config.intervalMinutes = interval->value();
     m_config.daysBack = days->value();
     m_config.autoPopup = popup->isChecked();
+    m_config.autoUpdate = autoUpdate->isChecked();
+    m_config.githubToken = token->text().trimmed();
+    m_updater->setToken(m_config.githubToken);
     m_config.save();
 
     m_panel->setIntervalMinutes(m_config.intervalMinutes);

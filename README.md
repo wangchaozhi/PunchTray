@@ -30,6 +30,18 @@ cmake --build build --config Release
 
 On Windows, run `windeployqt --release build\Release\PunchTray.exe` afterwards. On macOS, use `macdeployqt`.
 
+## Auto update
+
+When the app starts and every 6 hours after that, it checks the latest GitHub Release. You can also check from the tray menu (检查更新).
+If a newer version exists, a notification appears. Clicking it, or choosing 更新到 vX in the tray menu, downloads the package for your platform and installs it:
+
+- **Windows:** unpacks the zip over the program folder. The folder must be writable, so don't put it under Program Files.
+- **macOS:** replaces the running `.app` bundle with the one from the dmg.
+- **Linux:** replaces the running AppImage file.
+
+The app then restarts. `PunchTray --update` does the same from the command line without asking; if PunchTray is already running, the running instance performs the update. If it can't tell how it was installed, it opens the release page in the browser instead.
+While the repository is private, the GitHub API needs a token. Enter it in 设置 (Settings) → GitHub Token. A fine-grained token with read-only Contents permission is enough.
+
 ## Release
 
 `.github/workflows/release.yml` builds Windows x64 (zip), macOS arm64 (dmg) and Linux x64 (AppImage) packages and publishes them as a GitHub Release. It runs either way:
