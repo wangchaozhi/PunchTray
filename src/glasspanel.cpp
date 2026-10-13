@@ -422,6 +422,26 @@ void GlassPanel::paintContent(QPainter &p)
         p.drawLine(card.left() + 20, yy, card.right() - 20, yy);
     };
 
+    // "当前时间 HH:mm:ss" block on a row's second line, centred on `centerX`
+    // (or right-aligned when centerX < 0). Returns the space it takes from the right edge.
+    const QFont captionFont = fontOf(11, QFont::Normal);
+    const QFont clockFont = fontOf(12, QFont::Medium);
+    const QString caption = QStringLiteral("当前时间");
+    const int captionW = QFontMetrics(captionFont).horizontalAdvance(caption);
+    const int gap = 6;
+    const int blockW = captionW + gap + clockWidth(clockFont);
+    auto drawClockBlock = [&](int top, int height, int centerX) {
+        const int right = centerX >= 0 ? centerX + (blockW + 1) / 2 : card.right() - 20;
+        const int left = right - blockW;
+        QColor captionColor = dim;
+        captionColor.setAlpha(120);
+        p.setPen(captionColor);
+        p.setFont(captionFont);
+        p.drawText(QRect(left, top, captionW, height), Qt::AlignLeft | Qt::AlignVCenter, caption);
+        paintClock(p, QRect(left + captionW + gap, top, right - left - captionW - gap, height), clockFont, dim);
+        return card.right() - 20 - left;
+    };
+
     const QDateTime now = QDateTime::currentDateTime();
     for (const AttendanceRecord &r : m_records) {
         separator(y);
@@ -453,6 +473,7 @@ void GlassPanel::paintContent(QPainter &p)
 
         // Countdown for today's records.
         const QTime missed = QTime::fromString(time, "H:mm");
+        int countdownCenter = -1;
         if (r.date == today && missed.isValid()) {
             const qint64 mins = now.secsTo(QDateTime(today, missed)) / 60;
             QString text;
@@ -466,7 +487,10 @@ void GlassPanel::paintContent(QPainter &p)
             }
             p.setPen(color);
             p.setFont(fontOf(12, QFont::DemiBold));
-            p.drawText(QRect(card.right() - 20 - 120, y + 17, 120, 20), Qt::AlignRight | Qt::AlignVCenter, text);
+            // Countdown and clock share a right-hand column and are centred in it.
+            const int colW = qMax(p.fontMetrics().horizontalAdvance(text), blockW);
+            countdownCenter = card.right() - 20 - colW / 2;
+            p.drawText(QRect(countdownCenter - colW / 2 - 1, y + 17, colW + 2, 20), Qt::AlignCenter, text);
         }
 
         p.setPen(dim);
@@ -476,7 +500,7 @@ void GlassPanel::paintContent(QPainter &p)
             detail += QStringLiteral("  ·  上班 ") + shortTime(r.firstCard);
         if (!r.lastCard.isEmpty())
             detail += QStringLiteral("  ·  下班 ") + shortTime(r.lastCard);
-        const int clockW = paintClock(p, QRect(x, y + 46, card.width() - 40, 16), fontOf(12, QFont::Medium), dim);
+        const int clockW = drawClockBlock(y + 46, 16, countdownCenter);
         p.setPen(dim);
         p.setFont(fontOf(12, QFont::Normal));
         const int detailW = card.width() - 40 - clockW - 10;
@@ -506,7 +530,7 @@ void GlassPanel::paintContent(QPainter &p)
         p.drawText(QRect(x, y + 12, card.width() - 40, 26), Qt::AlignLeft | Qt::AlignVCenter, title);
         p.setPen(dim);
         p.setFont(fontOf(12, QFont::Normal));
-        const int clockW = paintClock(p, QRect(x, y + 40, card.width() - 40, 20), fontOf(12, QFont::Medium), dim);
+        const int clockW = drawClockBlock(y + 40, 20, -1);
         p.setPen(dim);
         p.setFont(fontOf(12, QFont::Normal));
         const int subW = card.width() - 40 - clockW - 10;
@@ -574,6 +598,18 @@ void GlassPanel::tick()
     update();
     if (isVisible() || m_fade->endValue().toReal() > 0.5)
         scheduleTick();
+}
+
+int GlassPanel::clockWidth(const QFont &font) const
+{
+    const QFontMetrics fm(font);
+    int digitW = 0;
+    for (QChar c = '0'; c <= '9'; c = QChar(c.unicode() + 1))
+        digitW = qMax(digitW, fm.horizontalAdvance(c));
+    int total = 0;
+    for (QChar c : m_clockNow)
+        total += c == ':' ? fm.horizontalAdvance(QLatin1Char(':')) : digitW;
+    return total;
 }
 
 // Draws the HH:mm:ss clock right-aligned in `area`; returns the width used.

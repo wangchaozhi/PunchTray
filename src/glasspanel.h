@@ -57,6 +57,7 @@ private:
     void paintBackdrop(QPainter &p, const QPainterPath &shape);
     void paintContent(QPainter &p);
     int paintClock(QPainter &p, const QRect &area, const QFont &font, const QColor &color);
+    int clockWidth(const QFont &font) const;
     void tick();
     void scheduleTick();
 
