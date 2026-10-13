@@ -422,23 +422,14 @@ void GlassPanel::paintContent(QPainter &p)
         p.drawLine(card.left() + 20, yy, card.right() - 20, yy);
     };
 
-    // "当前时间 HH:mm:ss" block on a row's second line, centred on `centerX`
-    // (or right-aligned when centerX < 0). Returns the space it takes from the right edge.
-    const QFont captionFont = fontOf(11, QFont::Normal);
+    // Live HH:mm:ss clock on a row's second line, centred on `centerX` (or
+    // right-aligned when centerX < 0). Returns the space it takes from the right edge.
     const QFont clockFont = fontOf(12, QFont::Medium);
-    const QString caption = QStringLiteral("当前时间");
-    const int captionW = QFontMetrics(captionFont).horizontalAdvance(caption);
-    const int gap = 6;
-    const int blockW = captionW + gap + clockWidth(clockFont);
+    const int blockW = clockWidth(clockFont);
     auto drawClockBlock = [&](int top, int height, int centerX) {
         const int right = centerX >= 0 ? centerX + (blockW + 1) / 2 : card.right() - 20;
         const int left = right - blockW;
-        QColor captionColor = dim;
-        captionColor.setAlpha(120);
-        p.setPen(captionColor);
-        p.setFont(captionFont);
-        p.drawText(QRect(left, top, captionW, height), Qt::AlignLeft | Qt::AlignVCenter, caption);
-        paintClock(p, QRect(left + captionW + gap, top, right - left - captionW - gap, height), clockFont, dim);
+        paintClock(p, QRect(left, top, blockW, height), clockFont, dim);
         return card.right() - 20 - left;
     };
 
