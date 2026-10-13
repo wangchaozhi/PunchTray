@@ -9,6 +9,7 @@
 #include <optional>
 
 class QPropertyAnimation;
+class QVariantAnimation;
 class QTimer;
 
 // Frameless always-on-top "liquid glass" card, by default in the top-right corner of the
@@ -55,6 +56,9 @@ private:
     void captureBackdropBehind();
     void paintBackdrop(QPainter &p, const QPainterPath &shape);
     void paintContent(QPainter &p);
+    void paintClock(QPainter &p, const QRect &area, const QColor &fg, const QColor &faint);
+    void tick();
+    void scheduleTick();
 
     QList<AttendanceRecord> m_records;
     QString m_error;
@@ -66,7 +70,12 @@ private:
     QImage m_backdrop;          // blurred, card-sized, device-pixel scaled
     bool m_darkBackdrop = true; // decides text colour
     QTimer *m_backdropTimer;
-    QTimer *m_tickTimer;        // keeps countdowns fresh
+    QTimer *m_tickTimer;        // fires on every wall-clock second while visible
+    QVariantAnimation *m_roll;  // 0..1 progress of the digit roll after a tick
+    QString m_clockPrev;        // "HH:mm:ss" before the last tick
+    QString m_clockNow;
+    int m_secondPrev = 0;
+    int m_secondNow = 0;
     QPropertyAnimation *m_fade;
     int m_hover = 0;            // 0 none, 1 close, 2 refresh
 
