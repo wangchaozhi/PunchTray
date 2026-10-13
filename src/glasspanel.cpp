@@ -25,7 +25,6 @@ constexpr int kShadow = 22;     // transparent margin used by the drop shadow
 constexpr int kWidth = 320;     // card width
 constexpr int kRadius = 24;
 constexpr int kHeader = 62;
-constexpr int kClock = 58;      // live clock band under the header
 constexpr int kRow = 70;
 constexpr int kFooter = 38;
 constexpr int kScreenGap = 6;   // distance from the screen edge
@@ -146,10 +145,9 @@ GlassPanel::GlassPanel(QWidget *parent)
     m_roll->setStartValue(0.0);
     m_roll->setEndValue(1.0);
     m_roll->setDuration(420);
-    m_roll->setEasingCurve(QEasingCurve::OutBack);
+    m_roll->setEasingCurve(QEasingCurve::OutCubic);
     connect(m_roll, &QVariantAnimation::valueChanged, this, qOverload<>(&QWidget::update));
     m_clockNow = m_clockPrev = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
-    m_secondNow = m_secondPrev = QTime::currentTime().second();
 
     relayout();
 }
@@ -181,7 +179,7 @@ void GlassPanel::relayout()
     int rows = qMax<int>(1, m_records.size());
     if (!m_error.isEmpty() && !m_records.isEmpty())
         ++rows;
-    const int h = kHeader + kClock + rows * kRow + kFooter;
+    const int h = kHeader + rows * kRow + kFooter;
     const QSize size(kWidth + 2 * kShadow, h + 2 * kShadow);
 
     QPoint topLeft;
@@ -417,11 +415,8 @@ void GlassPanel::paintContent(QPainter &p)
     drawButton(refreshButtonRect(), m_hover == 2, m_loading ? QStringLiteral("…") : QStringLiteral("↻"));
     drawButton(closeButtonRect(), m_hover == 1, QStringLiteral("✕"));
 
-    // Clock ------------------------------------------------------------------
-    paintClock(p, QRect(x, card.top() + kHeader, card.width() - 40, kClock), fg, faint);
-
     // Rows -------------------------------------------------------------------
-    int y = card.top() + kHeader + kClock;
+    int y = card.top() + kHeader;
     auto separator = [&](int yy) {
         p.setPen(QPen(faint, 1));
         p.drawLine(card.left() + 20, yy, card.right() - 20, yy);
@@ -485,7 +480,12 @@ void GlassPanel::paintContent(QPainter &p)
             detail += QStringLiteral("  ·  上班 ") + shortTime(r.firstCard);
         if (!r.lastCard.isEmpty())
             detail += QStringLiteral("  ·  下班 ") + shortTime(r.lastCard);
-        p.drawText(QRect(x, y + 46, card.width() - 40, 16), Qt::AlignLeft | Qt::AlignVCenter, detail);
+        const int clockW = paintClock(p, QRect(x, y + 46, card.width() - 40, 16), fontOf(12, QFont::Medium), dim);
+        p.setPen(dim);
+        p.setFont(fontOf(12, QFont::Normal));
+        const int detailW = card.width() - 40 - clockW - 10;
+        p.drawText(QRect(x, y + 46, detailW, 16), Qt::AlignLeft | Qt::AlignVCenter,
+                   p.fontMetrics().elidedText(detail, Qt::ElideRight, detailW));
         y += kRow;
     }
 
@@ -510,8 +510,12 @@ void GlassPanel::paintContent(QPainter &p)
         p.drawText(QRect(x, y + 12, card.width() - 40, 26), Qt::AlignLeft | Qt::AlignVCenter, title);
         p.setPen(dim);
         p.setFont(fontOf(12, QFont::Normal));
-        p.drawText(QRect(x, y + 40, card.width() - 40, 20), Qt::AlignLeft | Qt::AlignVCenter,
-                   p.fontMetrics().elidedText(sub, Qt::ElideRight, card.width() - 40));
+        const int clockW = paintClock(p, QRect(x, y + 40, card.width() - 40, 20), fontOf(12, QFont::Medium), dim);
+        p.setPen(dim);
+        p.setFont(fontOf(12, QFont::Normal));
+        const int subW = card.width() - 40 - clockW - 10;
+        p.drawText(QRect(x, y + 40, subW, 20), Qt::AlignLeft | Qt::AlignVCenter,
+                   p.fontMetrics().elidedText(sub, Qt::ElideRight, subW));
         y += kRow;
     }
 
@@ -567,9 +571,7 @@ void GlassPanel::tick()
     const QString text = t.toString(QStringLiteral("HH:mm:ss"));
     if (text != m_clockNow) {
         m_clockPrev = m_clockNow;
-        m_secondPrev = m_secondNow;
         m_clockNow = text;
-        m_secondNow = t.second();
         m_roll->stop();
         m_roll->start();
     }
@@ -578,87 +580,50 @@ void GlassPanel::tick()
         scheduleTick();
 }
 
-void GlassPanel::paintClock(QPainter &p, const QRect &area, const QColor &fg, const QColor &faint)
+// Draws the HH:mm:ss clock right-aligned in `area`; returns the width used.
+int GlassPanel::paintClock(QPainter &p, const QRect &area, const QFont &font, const QColor &color)
 {
     const qreal roll = m_roll->state() == QAbstractAnimation::Running ? m_roll->currentValue().toReal() : 1.0;
 
-    QFont f = p.font();
-    f.setPixelSize(38);
-    f.setWeight(QFont::DemiBold);
-    p.setFont(f);
-    const QFontMetrics fm(f);
+    p.setFont(font);
+    const QFontMetrics fm(font);
     int digitW = 0;
     for (QChar c = '0'; c <= '9'; c = QChar(c.unicode() + 1))
-        digitW = qMax(digitW, fm.horizontalAdvance(c));
-    const int colonW = fm.horizontalAdvance(QLatin1Char(':')) + 4;
+        digitW = qMax(digitW, fm.horizontalAdvance(c)); // fixed cells so the clock never jitters
+    const int colonW = fm.horizontalAdvance(QLatin1Char(':'));
+    int total = 0;
+    for (QChar c : m_clockNow)
+        total += c == ':' ? colonW : digitW;
     const int h = fm.height();
-    const int top = area.top() + 2;
+    const int top = area.top() + (area.height() - h) / 2;
 
     // Each changed digit rolls upward: the old one slides out, the new one slides in.
-    int cx = area.left() - 1;
+    int cx = area.right() + 1 - total;
     for (int i = 0; i < m_clockNow.size(); ++i) {
         const QChar now = m_clockNow.at(i);
         const QChar old = i < m_clockPrev.size() ? m_clockPrev.at(i) : now;
         const int w = now == ':' ? colonW : digitW;
         const QRect cell(cx, top, w, h);
         p.save();
-        p.setClipRect(cell.adjusted(0, -2, 0, 2));
+        p.setClipRect(cell);
         if (now == old || roll >= 1.0) {
-            QColor c = fg;
-            if (now == ':')
-                c.setAlphaF(0.55 + 0.45 * (1.0 - qMin(1.0, roll))); // colons pulse on each tick
-            p.setPen(c);
+            p.setPen(color);
             p.drawText(cell, Qt::AlignCenter, QString(now));
         } else {
             const qreal shift = roll * h;
-            QColor out = fg;
-            out.setAlphaF(qBound(0.0, 1.0 - roll, 1.0));
+            QColor out = color;
+            out.setAlphaF(color.alphaF() * qBound(0.0, 1.0 - roll, 1.0));
             p.setPen(out);
             p.drawText(cell.translated(0, int(-shift)), Qt::AlignCenter, QString(old));
-            QColor in = fg;
-            in.setAlphaF(qBound(0.0, roll, 1.0));
+            QColor in = color;
+            in.setAlphaF(color.alphaF() * qBound(0.0, roll, 1.0));
             p.setPen(in);
             p.drawText(cell.translated(0, int(h - shift)), Qt::AlignCenter, QString(now));
         }
         p.restore();
         cx += w;
     }
-
-    // Seconds track: flows across the minute, sweeping smoothly between ticks.
-    const qreal from = m_secondPrev / 60.0;
-    qreal to = m_secondNow / 60.0;
-    if (to < from)
-        to += 1.0; // wrap at the top of the minute
-    qreal frac = from + (to - from) * qMin(1.0, roll);
-    if (frac >= 1.0)
-        frac -= 1.0;
-    const QRectF track(area.left(), area.bottom() - 9, area.width(), 3);
-    p.setPen(Qt::NoPen);
-    p.setBrush(faint);
-    p.drawRoundedRect(track, 1.5, 1.5);
-    QLinearGradient g(track.topLeft(), track.topRight());
-    g.setColorAt(0, QColor(120, 190, 255, 220));
-    g.setColorAt(1, QColor(80, 140, 255, 255));
-    p.setBrush(g);
-    p.drawRoundedRect(QRectF(track.left(), track.top(), qMax(3.0, track.width() * frac), track.height()), 1.5, 1.5);
-    // Glowing head of the track.
-    const QPointF head(track.left() + track.width() * frac, track.center().y());
-    QRadialGradient glow(head, 7);
-    glow.setColorAt(0, QColor(160, 210, 255, 230));
-    glow.setColorAt(1, QColor(160, 210, 255, 0));
-    p.setBrush(glow);
-    p.drawEllipse(head, 7, 7);
-
-    // Caption to the right of the digits.
-    QFont small = f;
-    small.setPixelSize(12);
-    small.setWeight(QFont::Medium);
-    p.setFont(small);
-    QColor dimFg = fg;
-    dimFg.setAlpha(150);
-    p.setPen(dimFg);
-    p.drawText(QRect(cx + 10, top, area.right() - cx - 10, h), Qt::AlignLeft | Qt::AlignVCenter,
-               QStringLiteral("当前时间"));
+    return total;
 }
 
 void GlassPanel::mousePressEvent(QMouseEvent *e)

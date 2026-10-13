@@ -56,7 +56,7 @@ private:
     void captureBackdropBehind();
     void paintBackdrop(QPainter &p, const QPainterPath &shape);
     void paintContent(QPainter &p);
-    void paintClock(QPainter &p, const QRect &area, const QColor &fg, const QColor &faint);
+    int paintClock(QPainter &p, const QRect &area, const QFont &font, const QColor &color);
     void tick();
     void scheduleTick();
 
@@ -74,8 +74,6 @@ private:
     QVariantAnimation *m_roll;  // 0..1 progress of the digit roll after a tick
     QString m_clockPrev;        // "HH:mm:ss" before the last tick
     QString m_clockNow;
-    int m_secondPrev = 0;
-    int m_secondNow = 0;
     QPropertyAnimation *m_fade;
     int m_hover = 0;            // 0 none, 1 close, 2 refresh
 
