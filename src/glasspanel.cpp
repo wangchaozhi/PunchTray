@@ -147,7 +147,7 @@ GlassPanel::GlassPanel(QWidget *parent)
     m_roll->setDuration(420);
     m_roll->setEasingCurve(QEasingCurve::OutCubic);
     connect(m_roll, &QVariantAnimation::valueChanged, this, qOverload<>(&QWidget::update));
-    m_clockNow = m_clockPrev = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
+    m_clockNow = m_clockPrev = clockText();
 
     relayout();
 }
@@ -422,7 +422,7 @@ void GlassPanel::paintContent(QPainter &p)
         p.drawLine(card.left() + 20, yy, card.right() - 20, yy);
     };
 
-    // Live HH:mm:ss clock on a row's second line, centred on `centerX` (or
+    // Live clock on a row's second line, centred on `centerX` (or
     // right-aligned when centerX < 0). Returns the space it takes from the right edge.
     const QFont clockFont = fontOf(12, QFont::Medium);
     const int blockW = clockWidth(clockFont);
@@ -572,14 +572,14 @@ void GlassPanel::captureBackdropBehind()
 void GlassPanel::scheduleTick()
 {
     // Land just after the next wall-clock second so the clock never skips or stalls.
-    const int ms = QTime::currentTime().msec();
-    m_tickTimer->start(1000 - ms + 5);
+    const QTime t = QTime::currentTime();
+    const int toNext = m_showSeconds ? 1000 - t.msec() : (60 - t.second()) * 1000 - t.msec();
+    m_tickTimer->start(toNext + 5);
 }
 
 void GlassPanel::tick()
 {
-    const QTime t = QTime::currentTime();
-    const QString text = t.toString(QStringLiteral("HH:mm:ss"));
+    const QString text = clockText();
     if (text != m_clockNow) {
         m_clockPrev = m_clockNow;
         m_clockNow = text;
@@ -603,7 +603,24 @@ int GlassPanel::clockWidth(const QFont &font) const
     return total;
 }
 
-// Draws the HH:mm:ss clock right-aligned in `area`; returns the width used.
+QString GlassPanel::clockText() const
+{
+    return QTime::currentTime().toString(m_showSeconds ? QStringLiteral("HH:mm:ss") : QStringLiteral("HH:mm"));
+}
+
+void GlassPanel::setShowSeconds(bool show)
+{
+    if (show == m_showSeconds)
+        return;
+    m_showSeconds = show;
+    m_roll->stop();
+    m_clockNow = m_clockPrev = clockText(); // no roll between the two formats
+    if (m_tickTimer->isActive())
+        scheduleTick();
+    update();
+}
+
+// Draws the clock right-aligned in `area`; returns the width used.
 int GlassPanel::paintClock(QPainter &p, const QRect &area, const QFont &font, const QColor &color)
 {
     const qreal roll = m_roll->state() == QAbstractAnimation::Running ? m_roll->currentValue().toReal() : 1.0;

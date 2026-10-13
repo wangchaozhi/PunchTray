@@ -25,6 +25,7 @@ public:
     void setError(const QString &message);
     void setLoading(bool loading);
     void setIntervalMinutes(int minutes) { m_interval = minutes; update(); }
+    void setShowSeconds(bool show);
 
     void showAnimated();
     void hideAnimated();
@@ -60,6 +61,7 @@ private:
     int clockWidth(const QFont &font) const;
     void tick();
     void scheduleTick();
+    QString clockText() const;
 
     QList<AttendanceRecord> m_records;
     QString m_error;
@@ -73,7 +75,8 @@ private:
     QTimer *m_backdropTimer;
     QTimer *m_tickTimer;        // fires on every wall-clock second while visible
     QVariantAnimation *m_roll;  // 0..1 progress of the digit roll after a tick
-    QString m_clockPrev;        // "HH:mm:ss" before the last tick
+    bool m_showSeconds = true;
+    QString m_clockPrev;        // clock text before the last tick
     QString m_clockNow;
     QPropertyAnimation *m_fade;
     int m_hover = 0;            // 0 none, 1 close, 2 refresh

@@ -128,6 +128,7 @@ TrayApp::TrayApp(QObject *parent)
     });
     m_panel->setCustomPosition(m_config.panelPos);
     m_panel->setIntervalMinutes(m_config.intervalMinutes);
+    m_panel->setShowSeconds(m_config.showSeconds);
     m_timer->start(m_config.intervalMinutes * 60 * 1000);
 
     if (!m_config.isComplete())
@@ -307,6 +308,8 @@ void TrayApp::openSettings()
     days->setValue(m_config.daysBack);
     auto *popup = new QCheckBox(QStringLiteral("发现新的未打卡记录时自动弹出面板"));
     popup->setChecked(m_config.autoPopup);
+    auto *seconds = new QCheckBox(QStringLiteral("当前时间显示秒"));
+    seconds->setChecked(m_config.showSeconds);
     auto *autoUpdate = new QCheckBox(QStringLiteral("自动检查更新"));
     autoUpdate->setChecked(m_config.autoUpdate);
     auto *token = new QLineEdit(m_config.githubToken);
@@ -321,6 +324,7 @@ void TrayApp::openSettings()
     form->addRow(QStringLiteral("刷新间隔"), intervalRow);
     form->addRow(QStringLiteral("向前查询"), days);
     form->addRow(QString(), popup);
+    form->addRow(QString(), seconds);
     form->addRow(QString(), autoUpdate);
     form->addRow(QStringLiteral("GitHub Token"), token);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
@@ -338,6 +342,8 @@ void TrayApp::openSettings()
     m_config.intervalMinutes = interval->value() * intervalUnit->currentData().toInt();
     m_config.daysBack = days->value();
     m_config.autoPopup = popup->isChecked();
+    m_config.showSeconds = seconds->isChecked();
+    m_panel->setShowSeconds(m_config.showSeconds);
     m_config.autoUpdate = autoUpdate->isChecked();
     m_config.githubToken = token->text().trimmed();
     m_updater->setToken(m_config.githubToken);
