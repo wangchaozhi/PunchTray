@@ -519,9 +519,11 @@ void GlassPanel::paintContent(QPainter &p)
     separator(y);
     p.setPen(dim);
     p.setFont(fontOf(11, QFont::Normal));
+    const QString every = m_interval % 60 == 0 ? QStringLiteral("每 %1 小时刷新").arg(m_interval / 60)
+                                               : QStringLiteral("每 %1 分钟刷新").arg(m_interval);
     const QString footer = m_updated.isValid()
-        ? QStringLiteral("更新于 %1 · 每 %2 分钟刷新").arg(m_updated.toString("HH:mm")).arg(m_interval)
-        : QStringLiteral("每 %1 分钟刷新").arg(m_interval);
+        ? QStringLiteral("更新于 %1 · ").arg(m_updated.toString("HH:mm")) + every
+        : every;
     p.drawText(QRect(x, y, card.width() - 40, kFooter), Qt::AlignLeft | Qt::AlignVCenter, footer);
 }
 

@@ -38,7 +38,7 @@ Config Config::load()
     c.cookie = o.value("cookie").toString();
     c.staffId = o.value("staffId").toString();
     c.staffText = o.value("staffText").toString();
-    c.intervalMinutes = qMax(1, o.value("intervalMinutes").toInt(c.intervalMinutes));
+    c.intervalMinutes = qBound(1, o.value("intervalMinutes").toInt(c.intervalMinutes), 24 * 60);
     c.daysBack = qBound(0, o.value("daysBack").toInt(c.daysBack), 31);
     c.autoPopup = o.value("autoPopup").toBool(c.autoPopup);
     c.autoUpdate = o.value("autoUpdate").toBool(c.autoUpdate);

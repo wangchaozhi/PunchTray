@@ -7,10 +7,12 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
@@ -274,10 +276,30 @@ void TrayApp::openSettings()
     auto *staffText = new QLineEdit(m_config.staffText);
     staffText->setPlaceholderText(QStringLiteral("姓名(邮箱)"));
     auto *url = new QLineEdit(m_config.url);
+    // Interval is stored in minutes; whole hours are shown in hours.
     auto *interval = new QSpinBox;
-    interval->setRange(1, 240);
-    interval->setSuffix(QStringLiteral(" 分钟"));
-    interval->setValue(m_config.intervalMinutes);
+    auto *intervalUnit = new QComboBox;
+    intervalUnit->addItem(QStringLiteral("分钟"), 1);
+    intervalUnit->addItem(QStringLiteral("小时"), 60);
+    const bool inHours = m_config.intervalMinutes % 60 == 0;
+    intervalUnit->setCurrentIndex(inHours ? 1 : 0);
+    interval->setRange(1, inHours ? 24 : 24 * 60);
+    interval->setValue(inHours ? m_config.intervalMinutes / 60 : m_config.intervalMinutes);
+    // Switching the unit keeps the same duration where possible.
+    connect(intervalUnit, &QComboBox::currentIndexChanged, interval, [interval](int index) {
+        if (index == 1) {
+            const int hours = qBound(1, (interval->value() + 30) / 60, 24);
+            interval->setRange(1, 24);
+            interval->setValue(hours);
+        } else {
+            const int minutes = interval->value() * 60;
+            interval->setRange(1, 24 * 60);
+            interval->setValue(minutes);
+        }
+    });
+    auto *intervalRow = new QHBoxLayout;
+    intervalRow->addWidget(interval, 1);
+    intervalRow->addWidget(intervalUnit);
     auto *days = new QSpinBox;
     days->setRange(0, 31);
     days->setSuffix(QStringLiteral(" 天"));
@@ -296,7 +318,7 @@ void TrayApp::openSettings()
     form->addRow(QStringLiteral("员工 ID"), staffId);
     form->addRow(QStringLiteral("员工名称"), staffText);
     form->addRow(QStringLiteral("接口地址"), url);
-    form->addRow(QStringLiteral("刷新间隔"), interval);
+    form->addRow(QStringLiteral("刷新间隔"), intervalRow);
     form->addRow(QStringLiteral("向前查询"), days);
     form->addRow(QString(), popup);
     form->addRow(QString(), autoUpdate);
@@ -313,7 +335,7 @@ void TrayApp::openSettings()
     m_config.staffId = staffId->text().trimmed();
     m_config.staffText = staffText->text().trimmed();
     m_config.url = url->text().trimmed();
-    m_config.intervalMinutes = interval->value();
+    m_config.intervalMinutes = interval->value() * intervalUnit->currentData().toInt();
     m_config.daysBack = days->value();
     m_config.autoPopup = popup->isChecked();
     m_config.autoUpdate = autoUpdate->isChecked();
