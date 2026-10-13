@@ -454,18 +454,14 @@ void GlassPanel::paintContent(QPainter &p)
         // Countdown for today's records.
         const QTime missed = QTime::fromString(time, "H:mm");
         if (r.date == today && missed.isValid()) {
-            const qint64 secs = now.secsTo(QDateTime(today, missed));
-            const qint64 a = qAbs(secs);
-            const QString hms = QStringLiteral("%1:%2:%3")
-                                    .arg(a / 3600)
-                                    .arg(a / 60 % 60, 2, 10, QLatin1Char('0'))
-                                    .arg(a % 60, 2, 10, QLatin1Char('0'));
+            const qint64 mins = now.secsTo(QDateTime(today, missed)) / 60;
             QString text;
             QColor color = dim;
-            if (secs > 0) {
-                text = QStringLiteral("还有 ") + hms;
-            } else {
-                text = QStringLiteral("已过 ") + hms;
+            if (mins > 0)
+                text = mins >= 60 ? QStringLiteral("还有 %1 小时 %2 分").arg(mins / 60).arg(mins % 60)
+                                  : QStringLiteral("还有 %1 分钟").arg(mins);
+            else {
+                text = QStringLiteral("已过 %1 分钟").arg(-mins);
                 color = kRed;
             }
             p.setPen(color);
