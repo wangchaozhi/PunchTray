@@ -114,8 +114,14 @@ jobs:
         if: steps.cache-qt.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          python -m pip install --upgrade pip aqtinstall
-          python -m aqt install-qt "${{ matrix.aqt_host }}" desktop "${QT_VERSION}" "${{ matrix.qt_arch }}" -O "${RUNNER_TEMP}/Qt"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # aqtinstall cannot read the per-toolchain Windows repository used since Qt 6.11.
+            python .github/scripts/install-qt-windows.py "${QT_VERSION}" "${{ matrix.qt_dir }}" "${{ matrix.qt_arch }}" \
+              "${RUNNER_TEMP}/Qt/${QT_VERSION}/${{ matrix.qt_dir }}" qtbase
+          else
+            python -m pip install --upgrade pip aqtinstall
+            python -m aqt install-qt "${{ matrix.aqt_host }}" desktop "${QT_VERSION}" "${{ matrix.qt_arch }}" -O "${RUNNER_TEMP}/Qt"
+          fi
 
       - name: Configure Qt environment
         shell: bash
